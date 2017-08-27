@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mailimage</title>
+  <style>
+    body {
+      margin: 0;
+      display: grid;
+      background-color: #24a4ce33;
+    }
+
+    header {
+      background-color: #24a4cecc;
+      padding: 10px;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0;
+    }
+
+    main {
+      margin: 10px;
+    }
+
+    main section {
+      width: 300px;
+      height: 300px;
+      overflow: hidden;
+      border: 1px solid;
+      text-align: center;
+      margin: 5px;
+      float: left;
+    }
+    main section h1 {
+      font-size: 0.9em;
+    }
+    main section img {
+      display: block;
+      margin: auto;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mailimage</h1>
+  </header>
+  <main>
+    {{ range . }}
+      <section>
+        <h1>{{ .Subject }}</h1>
+        <cite>{{ .From }} {{ .Created }}</cite>
+        <a href="image/{{ .ID }}{{ .Extension }}">
+          <img src="thumbnail/{{ .ID }}.jpg" alt="" width="250px" height="200px">
+        </a>
+        {{ .Text }}
+      </section>
+    {{ else }}
+      Keine Bilder vorhanden.
+    {{ end }}
+  </main>
+</body>
+</html>

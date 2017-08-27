@@ -1,0 +1,33 @@
+[submodule "vendor/github.com/jhillyerd/enmime"]
+	path = vendor/github.com/jhillyerd/enmime
+	url = https://github.com/jhillyerd/enmime
+[submodule "vendor/github.com/jaytaylor/html2text"]
+	path = vendor/github.com/jaytaylor/html2text
+	url = https://github.com/jaytaylor/html2text
+[submodule "vendor/github.com/olekukonko/tablewriter"]
+	path = vendor/github.com/olekukonko/tablewriter
+	url = https://github.com/olekukonko/tablewriter
+[submodule "vendor/github.com/mattn/go-runewidth"]
+	path = vendor/github.com/mattn/go-runewidth
+	url = https://github.com/mattn/go-runewidth
+[submodule "vendor/github.com/ssor/bom"]
+	path = vendor/github.com/ssor/bom
+	url = https://github.com/ssor/bom
+[submodule "vendor/golang.org/x/net"]
+	path = vendor/golang.org/x/net
+	url = https://go.googlesource.com/net
+[submodule "vendor/golang.org/x/text"]
+	path = vendor/golang.org/x/text
+	url = https://go.googlesource.com/text
+[submodule "vendor/github.com/garyburd/redigo"]
+	path = vendor/github.com/garyburd/redigo
+	url = https://github.com/garyburd/redigo
+[submodule "vendor/github.com/urfave/cli"]
+	path = vendor/github.com/urfave/cli
+	url = https://github.com/urfave/cli
+[submodule "vendor/github.com/disintegration/imaging"]
+	path = vendor/github.com/disintegration/imaging
+	url = https://github.com/disintegration/imaging
+[submodule "vendor/golang.org/x/image"]
+	path = vendor/golang.org/x/image
+	url = https://go.googlesource.com/image
