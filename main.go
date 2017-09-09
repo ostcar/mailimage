@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/urfave/cli"
 )
@@ -42,6 +44,29 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				serve(c.String("listen"))
+				return nil
+			},
+		},
+		{
+			Name:    "delete",
+			Aliases: []string{"d"},
+			Usage:   "delete an image by id from the database",
+			Action: func(c *cli.Context) error {
+				idS := c.Args().First()
+				if idS == "" {
+					fmt.Printf("No id given")
+					os.Exit(1)
+				}
+				id, err := strconv.Atoi(idS)
+				if err != nil {
+					fmt.Printf("Id has to be a string")
+					os.Exit(1)
+				}
+				err = deleteFromID(id)
+				if err != nil {
+					fmt.Printf("Can not delete image: %s", err)
+				}
+
 				return nil
 			},
 		},

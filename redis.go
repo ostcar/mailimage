@@ -52,6 +52,7 @@ func postEntry(entry *Entry) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
+
 	_, err = conn.Do(
 		"HMSET",
 		key("entry", strconv.Itoa(id)),
@@ -187,7 +188,14 @@ func deleteFromToken(token string) error {
 		return fmt.Errorf("can not find id for token: %s", err)
 	}
 
-	_, err = conn.Do("SREM", key("entries"), id)
+	return deleteFromID(id)
+}
+
+func deleteFromID(id int) error {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	_, err := conn.Do("SREM", key("entries"), id)
 	if err != nil {
 		return fmt.Errorf("can not delete entry id: %s", err)
 	}
@@ -195,6 +203,32 @@ func deleteFromToken(token string) error {
 	_, err = conn.Do("DEL", key("entry", strconv.Itoa(id)))
 	if err != nil {
 		return fmt.Errorf("can not delete entry: %s", err)
+	}
+	return nil
+}
+
+func saveRawMail(raw []byte, errMessage string) error {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	now := time.Now().Format("2006-01-02-15:04:05")
+
+	_, err := conn.Do(
+		"Set",
+		key("mail-error", now, "raw"),
+		raw,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = conn.Do(
+		"Set",
+		key("mail-error", now, "error"),
+		errMessage,
+	)
+	if err != nil {
+		return err
 	}
 	return nil
 }

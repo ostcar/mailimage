@@ -20,7 +20,7 @@ func serveImage(w http.ResponseWriter, r *http.Request) {
 	}
 	image, dbExtension, err := getImage(id)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		w.WriteHeader(404)
 		return
 	}
 	if requestedExtension != dbExtension {
@@ -68,7 +68,7 @@ func serveDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, deleteRedirectURL, http.StatusFound)
 }
 
 func serve(dev string) {

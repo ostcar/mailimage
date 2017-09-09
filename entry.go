@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"net/mail"
 )
 
 type Entry struct {
-	raw       *bytes.Buffer
+	raw       []byte
 	address   *mail.Address
 	subject   string
 	text      string
