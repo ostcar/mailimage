@@ -26,7 +26,15 @@ func main() {
 			Name:    "insert",
 			Aliases: []string{"i"},
 			Usage:   "Read an mail from stdin, parse it and save the image into te database",
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:   "debug, d",
+					Usage:  "debug mode where mails are printed to stdout",
+					EnvVar: "DEBUG",
+				},
+			},
 			Action: func(c *cli.Context) error {
+				debug = c.Bool("debug")
 				insert(os.Stdin)
 				return nil
 			},

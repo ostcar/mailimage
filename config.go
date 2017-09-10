@@ -10,5 +10,6 @@ const (
 	textLength        = 200
 	responseRegards   = "Viele Grüße\nBaarfood"
 	deleteRedirectURL = "http://baarfood.de/ernte-teilen/"
-	debug             = false
 )
+
+var debug = false

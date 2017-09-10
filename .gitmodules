@@ -31,3 +31,6 @@
 [submodule "vendor/golang.org/x/image"]
 	path = vendor/golang.org/x/image
 	url = https://go.googlesource.com/image
+[submodule "vendor/gopkg.in/gomail.v2"]
+	path = vendor/gopkg.in/gomail.v2
+	url = https://gopkg.in/gomail.v2

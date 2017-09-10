@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"net/mail"
-	"net/smtp"
+	"os"
 	"text/template"
+
+	gomail "gopkg.in/gomail.v2"
 )
 
 var sendErrorTemplate = `Hallo{{ if .Name }} {{ .Name }}{{ end }},
@@ -27,30 +29,18 @@ du es mit einem klick auf den folgenden den Link:
 `
 
 func sendMail(to string, subject string, text string) error {
+	m := gomail.NewMessage()
+	m.SetHeader("From", fromAdress)
+	m.SetHeader("To", to)
+	m.SetHeader("Subject", subject)
+	m.SetBody("text/plain", text)
+
 	if debug {
-		fmt.Println(text)
-		return nil
+		m.WriteTo(os.Stdout)
 	}
-	// Connect to the remote SMTP server.
-	c, err := smtp.Dial("localhost:25")
-	if err != nil {
-		return fmt.Errorf("can not connect to smtp server: %s", err)
-	}
-	defer c.Close()
 
-	// Set the sender and recipient.
-	c.Mail(fromAdress)
-	c.Rcpt(to)
-
-	// Send the email body.
-	wc, err := c.Data()
-	if err != nil {
-		return fmt.Errorf("can not send mail: %s", err)
-	}
-	defer wc.Close()
-
-	buf := bytes.NewBufferString(text)
-	if _, err = buf.WriteTo(wc); err != nil {
+	d := gomail.Dialer{Host: "localhost", Port: 587}
+	if err := d.DialAndSend(m); err != nil {
 		return fmt.Errorf("can not send mail: %s", err)
 	}
 	return nil
