@@ -37,6 +37,7 @@ func sendMail(to string, subject string, text string) error {
 
 	if debug {
 		m.WriteTo(os.Stdout)
+		return nil
 	}
 
 	d := gomail.Dialer{Host: "localhost", Port: 587}
