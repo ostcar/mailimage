@@ -40,7 +40,7 @@ func sendMail(to string, subject string, text string) error {
 		return nil
 	}
 
-	d := gomail.Dialer{Host: "localhost", Port: 25}
+	d := gomail.Dialer{Host: "localhost", Port: 25, StartTLSPolicy: gomail.NoStartTLS}
 	if err := d.DialAndSend(m); err != nil {
 		return fmt.Errorf("can not connect to mailserver: %s", err)
 	}
