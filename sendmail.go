@@ -7,7 +7,7 @@ import (
 	"os"
 	"text/template"
 
-	gomail "gopkg.in/gomail.v2"
+	gomail "github.com/go-mail/mail"
 )
 
 var sendErrorTemplate = `Hallo{{ if .Name }} {{ .Name }}{{ end }},
@@ -40,9 +40,9 @@ func sendMail(to string, subject string, text string) error {
 		return nil
 	}
 
-	d := gomail.Dialer{Host: "localhost", Port: 587}
+	d := gomail.Dialer{Host: "localhost", Port: 25}
 	if err := d.DialAndSend(m); err != nil {
-		return fmt.Errorf("can not send mail: %s", err)
+		return fmt.Errorf("can not connect to mailserver: %s", err)
 	}
 	return nil
 }
