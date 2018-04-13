@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math/rand"
-	"path/filepath"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -56,8 +58,6 @@ func postEntry(entry *Entry) (int, string, error) {
 	_, err = conn.Do(
 		"HMSET",
 		key("entry", strconv.Itoa(id)),
-		"raw",
-		entry.raw,
 		"from",
 		entry.address.Name,
 		"mail",
@@ -66,10 +66,8 @@ func postEntry(entry *Entry) (int, string, error) {
 		entry.subject,
 		"text",
 		entry.text,
-		"image",
-		entry.image,
-		"filename",
-		entry.imageName,
+		"fileext",
+		entry.imageExt,
 		"thumbnail",
 		entry.thumbnail,
 		"created",
@@ -106,7 +104,7 @@ func listEntries() ([]ServeEntry, error) {
 			"from",
 			"subject",
 			"text",
-			"filename",
+			"fileext",
 			"created",
 		))
 		if err != nil {
@@ -122,7 +120,7 @@ func listEntries() ([]ServeEntry, error) {
 			From:      values[0],
 			Subject:   values[1],
 			Text:      values[2],
-			Extension: filepath.Ext(values[3]),
+			Extension: values[3],
 			Created:   created.Format("2006-01-02 15:04"),
 		})
 	}
@@ -133,16 +131,18 @@ func getImage(id int) ([]byte, string, error) {
 	conn := redisPool.Get()
 	defer conn.Close()
 
-	image, err := redis.Bytes(conn.Do("HGET", key("entry", strconv.Itoa(id)), "image"))
+	ext, err := redis.String(conn.Do("HGET", key("entry", strconv.Itoa(id)), "fileext"))
+	if err != nil {
+		return nil, "", fmt.Errorf("can not get imageext %d: %s", id, err)
+	}
+
+	filePath := path.Join(mailimagePath, "images", fmt.Sprintf("%d%s", id, ext))
+	image, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return nil, "", fmt.Errorf("can not get image %d: %s", id, err)
 	}
 
-	name, err := redis.String(conn.Do("HGET", key("entry", strconv.Itoa(id)), "filename"))
-	if err != nil {
-		return nil, "", fmt.Errorf("can not get imagename %d: %s", id, err)
-	}
-	return image, filepath.Ext(name), nil
+	return image, ext, nil
 }
 
 func getThumbnail(id int) ([]byte, error) {
@@ -195,40 +195,35 @@ func deleteFromID(id int) error {
 	conn := redisPool.Get()
 	defer conn.Close()
 
-	_, err := conn.Do("SREM", key("entries"), id)
+	ext, err := redis.String(conn.Do("HGET", key("entry", strconv.Itoa(id)), "fileext"))
+	if err != nil {
+		return fmt.Errorf("can not get imageext %d: %s", id, err)
+	}
+
+	// Delete from list
+	_, err = conn.Do("SREM", key("entries"), id)
 	if err != nil {
 		return fmt.Errorf("can not delete entry id: %s", err)
 	}
 
+	// Delete from redis
 	_, err = conn.Do("DEL", key("entry", strconv.Itoa(id)))
 	if err != nil {
 		return fmt.Errorf("can not delete entry: %s", err)
 	}
-	return nil
-}
 
-func saveRawMail(raw []byte, errMessage string) error {
-	conn := redisPool.Get()
-	defer conn.Close()
-
-	now := time.Now().Format("2006-01-02-15:04:05")
-
-	_, err := conn.Do(
-		"Set",
-		key("mail-error", now, "raw"),
-		raw,
-	)
+	// Delete image from disk
+	filePath := path.Join(mailimagePath, "images", fmt.Sprintf("%d%s", id, ext))
+	err = os.Remove(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("can not delete image from disk: %s", err)
 	}
 
-	_, err = conn.Do(
-		"Set",
-		key("mail-error", now, "error"),
-		errMessage,
-	)
+	// Delete mail fom disk
+	filePath = path.Join(mailimagePath, "success", strconv.Itoa(id))
+	err = os.Remove(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("can not delete file from disk: %s", err)
 	}
 	return nil
 }

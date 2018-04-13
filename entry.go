@@ -5,12 +5,10 @@ import (
 )
 
 type Entry struct {
-	raw       []byte
 	address   *mail.Address
 	subject   string
 	text      string
-	image     []byte
-	imageName string
+	imageExt  string
 	thumbnail []byte
 }
 

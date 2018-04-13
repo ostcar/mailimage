@@ -10,6 +10,7 @@ import (
 	"net/mail"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ func imageMatcher(part *enmime.Part) bool {
 	return isAllowed(part.ContentType)
 }
 
-func parseAttachments(part *enmime.Part) (image, thumbnail []byte, filename string, err error) {
+func parseAttachments(part *enmime.Part) (image, thumbnail []byte, fileExt string, err error) {
 	imageParts := part.DepthMatchAll(imageMatcher)
 	if len(imageParts) < 1 {
 		err = fmt.Errorf("Keine Bilddatei in der E-Mail gefunden.")
@@ -72,7 +73,7 @@ func parseAttachments(part *enmime.Part) (image, thumbnail []byte, filename stri
 		return
 	}
 
-	filename = imageParts[0].FileName
+	fileExt = filepath.Ext(imageParts[0].FileName)
 
 	imageObject, err := imaging.Decode(bytes.NewReader(image))
 	if err != nil {
@@ -91,7 +92,7 @@ func parseAttachments(part *enmime.Part) (image, thumbnail []byte, filename stri
 	return
 }
 
-func parseMail(mail *enmime.Envelope) (subject, text, imageName string, image, thumbnail []byte, messages []string) {
+func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image, thumbnail []byte, messages []string) {
 	messages = make([]string, 0)
 
 	subject = strings.TrimSpace(mail.Root.Header.Get("subject"))
@@ -106,7 +107,7 @@ func parseMail(mail *enmime.Envelope) (subject, text, imageName string, image, t
 		messages = append(messages, fmt.Sprintf("Text der E-Mail darf maximal %d Zeichen lang sein.", textLength))
 	}
 
-	image, thumbnail, imageName, err := parseAttachments(mail.Root)
+	image, thumbnail, imageExt, err := parseAttachments(mail.Root)
 	if err != nil {
 		messages = append(messages, err.Error())
 	}
@@ -158,8 +159,8 @@ func insert(in io.Reader) {
 
 	// Save mail to Disk
 	fileName = fmt.Sprintf("%s-%02d", time.Now().Format("2006-01-02_15-04-05"), rand.Intn(99))
-	file := path.Join(mailimagePath, "progress", fileName)
-	err = ioutil.WriteFile(file, raw, 0644)
+	filePath := path.Join(mailimagePath, "progress", fileName)
+	err = ioutil.WriteFile(filePath, raw, 0644)
 	if err != nil {
 		log.Fatalf("Can not save mail to disk")
 	}
@@ -177,7 +178,7 @@ func insert(in io.Reader) {
 	}
 
 	// Parse the mail and get all relevant informations
-	subject, text, imageName, image, thumbnail, messages := parseMail(envelope)
+	subject, text, imageExt, image, thumbnail, messages := parseMail(envelope)
 	if len(messages) > 0 {
 		err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "invalid", fileName))
 		if err != nil {
@@ -190,10 +191,19 @@ func insert(in io.Reader) {
 		return
 	}
 
-	entry := &Entry{raw, from, subject, text, image, imageName, thumbnail}
+	// Save data to redis
+	entry := &Entry{from, subject, text, imageExt, thumbnail}
 	id, token, err := postEntry(entry)
 	if err != nil {
 		log.Panicf("Can not save mail: %s", err)
+	}
+
+	// Save image to disk
+	filePath = path.Join(mailimagePath, "images", fmt.Sprintf("%d%s", id, imageExt))
+	err = ioutil.WriteFile(filePath, image, 0644)
+	if err != nil {
+		// TODO: Delete element from redis
+		log.Panicf("Can not save image to disk: %s", err)
 	}
 
 	// Move mail to success
