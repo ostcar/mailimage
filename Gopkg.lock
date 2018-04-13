@@ -4,8 +4,8 @@
 [[projects]]
   name = "github.com/disintegration/imaging"
   packages = ["."]
-  revision = "b039796423f87e7caca7f8eaace36878f2cce73d"
-  version = "v1.4.0"
+  revision = "fd34ef7671b12cdf1b024d98c6b327b2770d32c4"
+  version = "v1.4.1"
 
 [[projects]]
   name = "github.com/garyburd/redigo"
@@ -26,7 +26,7 @@
   branch = "master"
   name = "github.com/jaytaylor/html2text"
   packages = ["."]
-  revision = "190166da35878a77103b951ae035a473531c1fc2"
+  revision = "64a82a6d140778896f13303121a49d8cb8007034"
 
 [[projects]]
   name = "github.com/jhillyerd/enmime"
@@ -70,7 +70,7 @@
     "tiff",
     "tiff/lzw"
   ]
-  revision = "12117c17ca67ffa1ce22e9409f3b0b0a93ac08c7"
+  revision = "f315e440302883054d0c2bd85486878cb4f8572c"
 
 [[projects]]
   branch = "master"
@@ -79,7 +79,7 @@
     "html",
     "html/atom"
   ]
-  revision = "803fdb99c0f72e493c28ef2099d250a9c989d8ff"
+  revision = "61147c48b25b599e5b561d2e9c4f3e1ef489ca41"
 
 [[projects]]
   name = "golang.org/x/text"
