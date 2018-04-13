@@ -30,7 +30,7 @@ To configure postfix you have to put a line like
 mailimage: |"/path/to/mailimage insert"
 ```
 
-To the file ```/etc/aliases``` an run ```newaliases```.
+To the file ```/etc/aliases``` and run ```newaliases```.
 
 After this you can use the file ```/etc/postfix/virtual``` to send mails to the
 fictive user ```mailimage```.

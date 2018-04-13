@@ -6,14 +6,35 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/mail"
 	"os"
+	"path"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/jhillyerd/enmime"
 )
+
+func createFolders() (err error) {
+	folders := [...]string{
+		"progress",
+		"error",
+		"invalid",
+		"success",
+		"images",
+	}
+	for _, folder := range folders {
+		err = os.MkdirAll(path.Join(mailimagePath, folder), os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 var AllowedFormats = [...]string{
 	"jpeg",
@@ -97,17 +118,19 @@ func insert(in io.Reader) {
 	var raw []byte
 	var from *mail.Address
 	var err error
+	var fileName string
 
 	defer func() {
 		if r := recover(); r != nil {
 			recoveredErr := r.(string)
-			err := saveRawMail(raw, recoveredErr)
+			err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "error", fileName))
 			if err != nil {
-				log.Fatalf("Can not read mail: %s", r)
+				log.Printf("Can not move mail to error: %s", err)
 			}
+
 			err = sendError(from, "Fehler", []string{recoveredErr})
 			if err != nil {
-				log.Fatalf("Can not send mail response: %s", r)
+				log.Fatalf("Can not send mail response: %s, %s", r, err)
 			}
 		}
 	}()
@@ -122,10 +145,23 @@ func insert(in io.Reader) {
 		log.SetOutput(f)
 	}
 
+	// Create Folders
+	if err = createFolders(); err != nil {
+		log.Fatalf("Can not create folders: %s", err)
+	}
+
 	// Read mail to raw:
 	raw, err = ioutil.ReadAll(os.Stdin)
 	if err != nil {
 		log.Fatalf("Can not read mail from stdin: %s", err)
+	}
+
+	// Save mail to Disk
+	fileName = fmt.Sprintf("%s-%02d", time.Now().Format("2006-01-02_15-04-05"), rand.Intn(99))
+	file := path.Join(mailimagePath, "progress", fileName)
+	err = ioutil.WriteFile(file, raw, 0644)
+	if err != nil {
+		log.Fatalf("Can not save mail to disk")
 	}
 
 	// Build enmime envelope from raw mail
@@ -143,6 +179,10 @@ func insert(in io.Reader) {
 	// Parse the mail and get all relevant informations
 	subject, text, imageName, image, thumbnail, messages := parseMail(envelope)
 	if len(messages) > 0 {
+		err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "invalid", fileName))
+		if err != nil {
+			log.Printf("Can not move mail to invalid: %s", err)
+		}
 		err = sendError(from, subject, messages)
 		if err != nil {
 			log.Panicf("Can not send response mail: %s", err)
@@ -151,9 +191,15 @@ func insert(in io.Reader) {
 	}
 
 	entry := &Entry{raw, from, subject, text, image, imageName, thumbnail}
-	_, token, err := postEntry(entry)
+	id, token, err := postEntry(entry)
 	if err != nil {
 		log.Panicf("Can not save mail: %s", err)
+	}
+
+	// Move mail to success
+	err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "success", strconv.Itoa(id)))
+	if err != nil {
+		log.Panicf("Can not save mail to success: %s", err)
 	}
 
 	err = sendSuccess(from, subject, token)
