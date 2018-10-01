@@ -20,8 +20,10 @@ dein Bild kann nicht gespeichert werden. Bitte behebe {{ $length := len .Message
 
 var sendSuccessTemplate = `Hallo {{ .Name }},
 
-dein Bild wurde erfolgreich gespeichert. In den folgenden 24 Stunden kannst
-du es mit einem klick auf den folgenden den Link:
+dein Bild wurde erfolgreich veröffentlicht.
+
+In den folgenden 24 Stunden kannst du es mit einem klick auf den folgenden Link
+wieder löschen:
 
 {{ .RemoveLink }}
 
