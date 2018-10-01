@@ -6,7 +6,7 @@ const (
 	tokenExpire       = 24 * 60 * 60
 	baseURL           = "http://mailimage.oshahn.de"
 	logPath           = "/var/log/mailimage.log"
-	mailimagePath     = "srv/mailimage/mails"
+	mailimagePath     = "/srv/mailimage/mails"
 	subjectLength     = 25
 	textLength        = 200
 	responseRegards   = "Viele Grüße\nBaarfood"

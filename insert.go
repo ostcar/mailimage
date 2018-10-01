@@ -95,7 +95,7 @@ func parseAttachments(part *enmime.Part) (image, thumbnail []byte, fileExt strin
 func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image, thumbnail []byte, messages []string) {
 	messages = make([]string, 0)
 
-	subject = strings.TrimSpace(mail.Root.Header.Get("subject"))
+	subject = strings.TrimSpace(mail.GetHeader("subject"))
 	subject = strings.TrimPrefix(subject, "***SPAM***")
 	if len([]rune(subject)) > subjectLength {
 		messages = append(messages, fmt.Sprintf("E-Mail Betreff ist zu lang. Maximal %d zeichen sind erlaubt.", subjectLength))
