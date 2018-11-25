@@ -49,11 +49,9 @@ with this configuration:
 
 ```
 server {
-  server_name  mailimage.oshahn.de;
+  server_name  mailimage.baarfood.de;
 
-      include include/plain;
-
-      root /srv/sftp/openslides/files;
+    include include/plain;
 
     location / {
         proxy_pass http://localhost:5000;

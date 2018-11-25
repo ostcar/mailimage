@@ -20,7 +20,10 @@ dein Bild kann nicht gespeichert werden. Bitte behebe {{ $length := len .Message
 
 var sendSuccessTemplate = `Hallo {{ .Name }},
 
-dein Bild wurde erfolgreich veröffentlicht.
+dein Bild wurde erfolgreich veröffentlicht. Über folgenden Link kannst du es
+aufrufen:
+
+{{ .ImageLink }}
 
 In den folgenden 24 Stunden kannst du es mit einem klick auf den folgenden Link
 wieder löschen:
@@ -90,10 +93,12 @@ func sendSuccess(to *mail.Address, subject, token string) error {
 		&text,
 		struct {
 			Name       string
+			ImageLink  string
 			RemoveLink string
 			Regards    string
 		}{
 			to.Name,
+			deleteRedirectURL,
 			fmt.Sprintf("%s/delete/%s", baseURL, token),
 			responseRegards,
 		},
