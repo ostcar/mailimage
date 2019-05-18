@@ -27,7 +27,11 @@ func serveImage(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		return
 	}
-	w.Write(image)
+	if _, err := w.Write(image); err != nil {
+		log.Printf("Error: Can not write image to http writer: %v", err)
+		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
+		return
+	}
 }
 
 func serveThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -39,10 +43,15 @@ func serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 	thumbnail, err := getThumbnail(id)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("Error: can not fetch thumbnail: %v", err)
+		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
 		return
 	}
-	w.Write(thumbnail)
+	if _, err := w.Write(thumbnail); err != nil {
+		log.Printf("Error: Can not write image to http writer: %v", err)
+		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
+		return
+	}
 }
 
 //go:generate go run scripts/buildHTML.go
@@ -54,11 +63,16 @@ func servePage(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := listEntries()
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("Error: can not list Entries: %v", err)
+		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
 		return
 	}
 	sort.Sort(sort.Reverse(ByCreated(entries)))
-	tmpl.Execute(w, entries)
+	if err := tmpl.Execute(w, entries); err != nil {
+		log.Printf("Error: Can not execute template: %v", err)
+		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
+		return
+	}
 }
 
 func serveDelete(w http.ResponseWriter, r *http.Request) {

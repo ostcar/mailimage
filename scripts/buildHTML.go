@@ -14,11 +14,13 @@ var packageTemplate = template.Must(template.New("").Parse(
 func main() {
 	in, err := ioutil.ReadFile("index.html")
 	if err != nil {
-		log.Fatalf("can not open file: %s", err)
+		log.Fatalf("can not open file: %v", err)
 	}
 	out, err := os.Create("index.html.go")
 	if err != nil {
-		log.Fatalf("can not write index.html.go: %s", err)
+		log.Fatalf("can not write index.html.go: %v", err)
 	}
-	packageTemplate.Execute(out, string(in))
+	if err := packageTemplate.Execute(out, string(in)); err != nil {
+		log.Fatalf("can not execute template: %v", err)
+	}
 }
