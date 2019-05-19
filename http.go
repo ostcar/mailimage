@@ -1,95 +1,123 @@
 package main
 
 import (
-	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
+
+	"golang.org/x/xerrors"
 )
 
-func serveImage(w http.ResponseWriter, r *http.Request) {
+//go:generate go run scripts/buildHTML.go
+var indexTmpl = template.Must(template.New("indexPage").Parse(indexHTMLTemplate))
+
+func serve(addr string) error {
+	pool, err := newPool(redisAddr)
+	if err != nil {
+		return err
+	}
+
+	h := handler{redis: pool}
+
+	http.Handle("/", errHandleFunc(h.index))
+	http.Handle("/image/", errHandleFunc(h.image))
+	http.Handle("/thumbnail/", errHandleFunc(h.thumbnail))
+	http.Handle("/delete/", errHandleFunc(h.delete))
+
+	return http.ListenAndServe(addr, nil)
+}
+
+type handler struct {
+	redis *pool
+}
+
+// index returns the index page that list all images
+func (h *handler) index(w http.ResponseWriter, r *http.Request) error {
+	entries, err := h.redis.listEntries()
+	if err != nil {
+		return err
+	}
+
+	sort.Sort(sort.Reverse(byCreated(entries)))
+	if err := indexTmpl.Execute(w, entries); err != nil {
+		return xerrors.Errorf("can not execute index html template: %w", err)
+	}
+	return nil
+}
+
+// image returns an image via http.
+func (h *handler) image(w http.ResponseWriter, r *http.Request) error {
 	filename := r.URL.Path[len("/image/"):]
 	requestedExtension := filepath.Ext(filename)
+
 	id, err := strconv.Atoi(filename[0 : len(filename)-len(requestedExtension)])
 	if err != nil {
 		w.WriteHeader(404)
-		return
+		return nil
 	}
-	image, dbExtension, err := getImage(id)
+
+	image, dbExtension, err := h.redis.getImage(id)
 	if err != nil {
-		w.WriteHeader(404)
-		return
+		return err
 	}
+
 	if requestedExtension != dbExtension {
 		w.WriteHeader(404)
-		return
+		return nil
 	}
+
 	if _, err := w.Write(image); err != nil {
-		log.Printf("Error: Can not write image to http writer: %v", err)
-		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
-		return
+		return xerrors.Errorf("can not write image to response writer: %w", err)
 	}
+	return nil
 }
 
-func serveThumbnail(w http.ResponseWriter, r *http.Request) {
+// thumbnail returns a thunbmail from an image via http.
+func (h *handler) thumbnail(w http.ResponseWriter, r *http.Request) error {
 	filename := r.URL.Path[len("/thumbnail/"):]
+
 	id, err := strconv.Atoi(filename[0 : len(filename)-4])
 	if err != nil {
 		w.WriteHeader(404)
-		return
+		return nil
 	}
-	thumbnail, err := getThumbnail(id)
+
+	thumbnail, err := h.redis.getThumbnail(id)
 	if err != nil {
-		log.Printf("Error: can not fetch thumbnail: %v", err)
-		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
-		return
+		return err
 	}
+
 	if _, err := w.Write(thumbnail); err != nil {
-		log.Printf("Error: Can not write image to http writer: %v", err)
-		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
-		return
+		return xerrors.Errorf("can not write thumbnail to response writer: %w", err)
 	}
+	return nil
 }
 
-//go:generate go run scripts/buildHTML.go
-func servePage(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.New("").Parse(indexHTMLTemplate)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("can not parse template: %s", err), 500)
-		return
-	}
-	entries, err := listEntries()
-	if err != nil {
-		log.Printf("Error: can not list Entries: %v", err)
-		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
-		return
-	}
-	sort.Sort(sort.Reverse(ByCreated(entries)))
-	if err := tmpl.Execute(w, entries); err != nil {
-		log.Printf("Error: Can not execute template: %v", err)
-		http.Error(w, "Ups, something went wrong", http.StatusInternalServerError)
-		return
-	}
-}
-
-func serveDelete(w http.ResponseWriter, r *http.Request) {
+// delete deletes an image for an given token.
+func (h *handler) delete(w http.ResponseWriter, r *http.Request) error {
 	token := r.URL.Path[len("/delete/"):]
-	err := deleteFromToken(token)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+
+	if err := h.redis.deleteFromToken(token); err != nil {
+		return err
 	}
+
 	http.Redirect(w, r, deleteRedirectURL, http.StatusFound)
+	return nil
 }
 
-func serve(dev string) {
-	http.HandleFunc("/", servePage)
-	http.HandleFunc("/image/", serveImage)
-	http.HandleFunc("/thumbnail/", serveThumbnail)
-	http.HandleFunc("/delete/", serveDelete)
+type errHandleFunc func(w http.ResponseWriter, r *http.Request) error
 
-	log.Fatal(http.ListenAndServe(dev, nil))
+func (f errHandleFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := f(w, r); err != nil {
+		if err == errUnknownImage {
+			w.WriteHeader(404)
+			return
+		}
+
+		log.Printf("Error: %v", err)
+		http.Error(w, "Ups, something went wrong!", http.StatusInternalServerError)
+	}
 }

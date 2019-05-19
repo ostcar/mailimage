@@ -16,10 +16,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("can not open file: %v", err)
 	}
+
 	out, err := os.Create("index.html.go")
 	if err != nil {
 		log.Fatalf("can not write index.html.go: %v", err)
 	}
+
 	if err := packageTemplate.Execute(out, string(in)); err != nil {
 		log.Fatalf("can not execute template: %v", err)
 	}

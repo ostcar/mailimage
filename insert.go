@@ -18,9 +18,131 @@ import (
 
 	"github.com/disintegration/imaging"
 	"github.com/jhillyerd/enmime"
+	"golang.org/x/xerrors"
 )
 
-func createFolders() (err error) {
+// insert saves an image to the database and the filesystem
+func insert(in io.Reader) (err error) {
+	// Create Folders
+	if err = createFolders(); err != nil {
+		return xerrors.Errorf("can not create folders: %w", err)
+	}
+
+	// Open file to save mail
+	fileName := fmt.Sprintf("%s-%02d.eml", time.Now().Format("2006-01-02_15-04-05"), rand.Intn(99))
+	filePath := path.Join(mailimagePath(), "progress", fileName)
+	f, err := os.Create(filePath)
+	if err != nil {
+		return xerrors.Errorf("can not open image file for writing: %w", err)
+	}
+	defer f.Close()
+
+	// Save mail to file as soon as `in` is read
+	in = io.TeeReader(in, f)
+
+	// If an error happens after this line, move mail to error folder
+	defer func() {
+		if err != nil {
+			e := os.Rename(filePath, path.Join(mailimagePath(), "error", fileName))
+			if e != nil {
+				log.Printf("Original error: %v", err)
+				err = xerrors.Errorf("can not move mail to folder error: %w", e)
+			}
+		}
+	}()
+
+	// Build enmime envelope by reading `in`
+	envelope, err := enmime.ReadEnvelope(in)
+	if err != nil {
+		return xerrors.Errorf("can not interprete mail: %w", err)
+	}
+
+	// Read the senders address
+	from, err := mail.ParseAddress(envelope.Root.Header.Get("from"))
+	if err != nil {
+		return xerrors.Errorf("can not interprete mail address: %w", err)
+	}
+
+	// If an error happens after this line, send a respond mail
+	defer func() {
+		if err != nil {
+			// TODO: Don't send the error template but a "500" template
+			sendErr := respondError(from.Name, from.Address, "Fehler", []error{errInternal})
+			if sendErr != nil {
+				log.Printf("Original error: %v", err)
+				err = xerrors.Errorf("can not send an error mail: %w", sendErr)
+			}
+		}
+	}()
+
+	// Parse the mail and get the relevant informations
+	// TODO: Try to save image as reader or writer
+	subject, text, imageExt, image, thumbnail, errs := parseMail(envelope)
+	if len(errs) > 0 {
+		// Move mail to invalid folder
+		newPath := path.Join(mailimagePath(), "invalid", fileName)
+		err = os.Rename(filePath, newPath)
+		if err != nil {
+			return xerrors.Errorf("can not move mail to invalid folder: %w", err)
+		}
+
+		filePath = newPath
+
+		if err := respondError(from.Name, from.Address, subject, errs); err != nil {
+			return xerrors.Errorf("can not responde to invalid mail: %w", err)
+		}
+		return nil
+	}
+
+	pool, err := newPool(redisAddr)
+	if err != nil {
+		return xerrors.Errorf("can not create redis pool: %w", err)
+	}
+
+	// Save data to redis
+	id, token, err := pool.postEntry(from.Name, from.Address, subject, text, imageExt, thumbnail)
+	if err != nil {
+		return xerrors.Errorf("can not save mail: %w", err)
+	}
+
+	// If an error happens after this line, delete element from redis
+	defer func() {
+		if err != nil {
+			// TODO: Delete element from redis
+		}
+	}()
+
+	// Save image to disk
+	imagePath := path.Join(mailimagePath(), "images", fmt.Sprintf("%d%s", id, imageExt))
+	err = ioutil.WriteFile(imagePath, image, 0644)
+	if err != nil {
+		return xerrors.Errorf("can not save image to disk: %w", err)
+	}
+
+	// If an error happens after this line, delete image from disk
+	defer func() {
+		if err != nil {
+			// TODO: Delete element from disk
+		}
+	}()
+
+	// Move mail to success
+	newPath := path.Join(mailimagePath(), "success", strconv.Itoa(id))
+	err = os.Rename(filePath, newPath)
+	if err != nil {
+		return xerrors.Errorf("can not move mail to success folder: %w", err)
+	}
+
+	filePath = newPath
+
+	if err := respondSuccess(from.Name, from.Address, subject, token); err != nil {
+		return xerrors.Errorf("can not send success mail: %w", err)
+	}
+	return nil
+}
+
+// createFolders creates the folders in the filesystem to save the mails and the images
+func createFolders() error {
 	folders := [...]string{
 		"progress",
 		"error",
@@ -29,22 +151,77 @@ func createFolders() (err error) {
 		"images",
 	}
 	for _, folder := range folders {
-		err = os.MkdirAll(path.Join(mailimagePath, folder), os.ModePerm)
-		if err != nil {
+		if err := os.MkdirAll(path.Join(mailimagePath(), folder), os.ModePerm); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-var AllowedFormats = [...]string{
-	"jpeg",
-	"png",
-	"jpg",
+// parseMail parses an email and returns all relevant information about it
+func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image, thumbnail []byte, errs []error) {
+	errs = make([]error, 0)
+
+	subject = strings.TrimSpace(mail.GetHeader("subject"))
+	subject = strings.TrimPrefix(subject, "***SPAM***")
+	if len(subject) > subjectLength {
+		errs = append(errs, errLongSubject)
+	}
+
+	text = regexp.MustCompile(`\r?\n`).ReplaceAllString(mail.Text, " ")
+	text = strings.TrimSpace(text)
+	if len(text) > textLength {
+		errs = append(errs, errLongText)
+	}
+
+	image, thumbnail, imageExt, err := parseAttachments(mail.Root)
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	return subject, text, imageExt, image, thumbnail, errs
 }
 
+// parseAttachments parses all attachments from an mail body and looks for supported images
+// The returned error message is send to the user.
+// Returns the image and the thumbnail as byte and the file extension
+func parseAttachments(part *enmime.Part) ([]byte, []byte, string, error) {
+	imageParts := part.DepthMatchAll(imageMatcher)
+	if len(imageParts) < 1 {
+		return nil, nil, "", errNoImage
+	}
+
+	if len(imageParts) > 1 {
+		return nil, nil, "", errMultiImage
+	}
+
+	if len(imageParts[0].Errors) > 0 {
+		errs := make([]string, len(imageParts[0].Errors))
+		for i, err := range imageParts[0].Errors {
+			errs[i] = err.Error()
+		}
+		log.Printf("Can not parse image: %s", strings.Join(errs, ","))
+		return nil, nil, "", errParsingImage
+	}
+
+	imageObject, err := imaging.Decode(bytes.NewReader(imageParts[0].Content))
+	if err != nil {
+		log.Printf("Can not read image: %v", err)
+		return nil, nil, "", errParsingImage
+	}
+
+	imageObject = imaging.Fill(imageObject, 250, 200, imaging.Center, imaging.Lanczos)
+	buf := bytes.NewBuffer(make([]byte, 0))
+	if err := imaging.Encode(buf, imageObject, imaging.JPEG); err != nil {
+		log.Printf("Can not create thumbnail: %v", err)
+		return nil, nil, "", errCreateThumbnail
+	}
+	return imageParts[0].Content, buf.Bytes(), filepath.Ext(imageParts[0].FileName), nil
+}
+
+// isAllowed returns true, if the attachment has a supported mail format
 func isAllowed(contentType string) bool {
-	for _, format := range AllowedFormats {
+	for _, format := range allowedFormats {
 		if ("image/" + format) == contentType {
 			return true
 		}
@@ -52,168 +229,7 @@ func isAllowed(contentType string) bool {
 	return false
 }
 
+// imageMatcher is a helper for the enime api to find image attachments in a mail
 func imageMatcher(part *enmime.Part) bool {
 	return isAllowed(part.ContentType)
-}
-
-func parseAttachments(part *enmime.Part) (image, thumbnail []byte, fileExt string, err error) {
-	imageParts := part.DepthMatchAll(imageMatcher)
-	if len(imageParts) < 1 {
-		err = fmt.Errorf("Keine Bilddatei in der E-Mail gefunden.")
-		return
-	}
-	if len(imageParts) > 1 {
-		err = fmt.Errorf("Mehrere Bilder gefunden. Die E-Mail darf maximal ein Bild entalten.")
-		return
-	}
-
-	image, err = ioutil.ReadAll(imageParts[0])
-	if err != nil {
-		err = fmt.Errorf("Die Bilddatei kann nicht gelesen werden: %s", err)
-		return
-	}
-
-	fileExt = filepath.Ext(imageParts[0].FileName)
-
-	imageObject, err := imaging.Decode(bytes.NewReader(image))
-	if err != nil {
-		err = fmt.Errorf("Die Bilddatei kann nicht gelesen werden: %s", err)
-		return
-	}
-
-	thumbnailObject := imaging.Fill(imageObject, 250, 200, imaging.Center, imaging.Lanczos)
-	buf := bytes.NewBuffer(make([]byte, 0))
-	err = imaging.Encode(buf, thumbnailObject, imaging.JPEG)
-	if err != nil {
-		err = fmt.Errorf("Thumbnail kann aus dem Bild nicht erstellt werden: %s", err)
-		return
-	}
-	thumbnail = buf.Bytes()
-	return
-}
-
-func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image, thumbnail []byte, messages []string) {
-	messages = make([]string, 0)
-
-	subject = strings.TrimSpace(mail.GetHeader("subject"))
-	subject = strings.TrimPrefix(subject, "***SPAM***")
-	if len([]rune(subject)) > subjectLength {
-		messages = append(messages, fmt.Sprintf("E-Mail Betreff ist zu lang. Maximal %d zeichen sind erlaubt.", subjectLength))
-	}
-
-	text = regexp.MustCompile(`\r?\n`).ReplaceAllString(mail.Text, " ")
-	text = strings.TrimSpace(text)
-	if len([]rune(text)) > textLength {
-		messages = append(messages, fmt.Sprintf("Text der E-Mail darf maximal %d Zeichen lang sein.", textLength))
-	}
-
-	image, thumbnail, imageExt, err := parseAttachments(mail.Root)
-	if err != nil {
-		messages = append(messages, err.Error())
-	}
-
-	return
-}
-
-func insert(in io.Reader) {
-	var raw []byte
-	var from *mail.Address
-	var err error
-	var fileName string
-
-	defer func() {
-		if r := recover(); r != nil {
-			recoveredErr := r.(string)
-			err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "error", fileName))
-			if err != nil {
-				log.Printf("Can not move mail to error: %s", err)
-			}
-
-			err = sendError(from, "Fehler", []string{recoveredErr})
-			if err != nil {
-				log.Fatalf("Can not send mail response: %s, %s", r, err)
-			}
-		}
-	}()
-
-	// Log to file
-	if !debug {
-		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0666)
-		if err != nil {
-			log.Fatalf("Can not open logfile: %s", err)
-		}
-		defer f.Close()
-		log.SetOutput(f)
-	}
-
-	// Create Folders
-	if err = createFolders(); err != nil {
-		log.Fatalf("Can not create folders: %s", err)
-	}
-
-	// Read mail to raw:
-	raw, err = ioutil.ReadAll(os.Stdin)
-	if err != nil {
-		log.Fatalf("Can not read mail from stdin: %s", err)
-	}
-
-	// Save mail to Disk
-	fileName = fmt.Sprintf("%s-%02d", time.Now().Format("2006-01-02_15-04-05"), rand.Intn(99))
-	filePath := path.Join(mailimagePath, "progress", fileName)
-	err = ioutil.WriteFile(filePath, raw, 0644)
-	if err != nil {
-		log.Fatalf("Can not save mail to disk")
-	}
-
-	// Build enmime envelope from raw mail
-	envelope, err := enmime.ReadEnvelope(bytes.NewReader(raw))
-	if err != nil {
-		log.Panicf("Can not interprete mail: %s", err)
-	}
-
-	// Read the senders address
-	from, err = mail.ParseAddress(envelope.Root.Header.Get("from"))
-	if err != nil {
-		log.Panicf("Can not interprete mail address: %s", err)
-	}
-
-	// Parse the mail and get all relevant informations
-	subject, text, imageExt, image, thumbnail, messages := parseMail(envelope)
-	if len(messages) > 0 {
-		err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "invalid", fileName))
-		if err != nil {
-			log.Printf("Can not move mail to invalid: %s", err)
-		}
-		err = sendError(from, subject, messages)
-		if err != nil {
-			log.Panicf("Can not send response mail: %s", err)
-		}
-		return
-	}
-
-	// Save data to redis
-	entry := &Entry{from, subject, text, imageExt, thumbnail}
-	id, token, err := postEntry(entry)
-	if err != nil {
-		log.Panicf("Can not save mail: %s", err)
-	}
-
-	// Save image to disk
-	filePath = path.Join(mailimagePath, "images", fmt.Sprintf("%d%s", id, imageExt))
-	err = ioutil.WriteFile(filePath, image, 0644)
-	if err != nil {
-		// TODO: Delete element from redis
-		log.Panicf("Can not save image to disk: %s", err)
-	}
-
-	// Move mail to success
-	err = os.Rename(path.Join(mailimagePath, "progress", fileName), path.Join(mailimagePath, "success", strconv.Itoa(id)))
-	if err != nil {
-		log.Panicf("Can not save mail to success: %s", err)
-	}
-
-	err = sendSuccess(from, subject, token)
-	if err != nil {
-		log.Panicf("can not send success mail: %s", err)
-	}
 }

@@ -1,0 +1,13 @@
+Subject: Hello
+To: Mailimage <mailimage@example.com>
+From: Some User <some.user@example.com>
+Date: Mon, 11 Sep 2017 10:43:37 +0200
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8; format=flowed
+Content-Transfer-Encoding: 8bit
+
+Dear User,
+
+this is a test mail.
+
+I hope it is valid

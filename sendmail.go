@@ -3,93 +3,67 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"net/mail"
 	"os"
 	"text/template"
 
-	gomail "github.com/go-mail/mail"
+	"golang.org/x/xerrors"
+	"gopkg.in/mail.v2"
 )
 
-var sendErrorTemplate = `Hallo{{ if .Name }} {{ .Name }}{{ end }},
+var (
+	mailErrorTmpl   = template.Must(template.New("mailError").Parse(sendErrorTemplate))
+	mailSuccessTmpl = template.Must(template.New("mailSuccess").Parse(sendSuccessTemplate))
+)
 
-dein Bild kann nicht gespeichert werden. Bitte behebe {{ $length := len .Messages }}{{ if gt $length 1 }}den folgenden{{ else }}die folgenden{{ end }} Fehler:
-{{ range .Messages }}* {{ . }}{{ end }}
-
-{{ .Regards }}
-`
-
-var sendSuccessTemplate = `Hallo {{ .Name }},
-
-dein Bild wurde erfolgreich veröffentlicht. Über folgenden Link kannst du es
-aufrufen:
-
-{{ .ImageLink }}
-
-In den folgenden 24 Stunden kannst du es mit einem klick auf den folgenden Link
-wieder löschen:
-
-{{ .RemoveLink }}
-
-{{ .Regards }}
-`
-
+// sendMail sends an email to an receiver.
+// If the environment varialbe DEBUG is set, prints the mail to stdout
 func sendMail(to string, subject string, text string) error {
-	m := gomail.NewMessage()
+	m := mail.NewMessage()
 	m.SetHeader("From", fromAdress)
 	m.SetHeader("To", to)
 	m.SetHeader("Subject", subject)
 	m.SetBody("text/plain", text)
 
-	if debug {
-		m.WriteTo(os.Stdout)
+	if os.Getenv("DEBUG") != "" {
+		if _, err := m.WriteTo(os.Stdout); err != nil {
+			return xerrors.Errorf("can not write mail to stdout: %w", err)
+		}
 		return nil
 	}
 
-	d := gomail.Dialer{Host: "localhost", Port: 25, StartTLSPolicy: gomail.NoStartTLS}
+	d := mail.Dialer{Host: smptHost, Port: smptPort}
 	if err := d.DialAndSend(m); err != nil {
-		return fmt.Errorf("can not connect to mailserver: %s", err)
+		return xerrors.Errorf("can not send mail: %w", err)
 	}
 	return nil
 }
 
-func sendError(to *mail.Address, subject string, messages []string) error {
-	subject = "Re: " + subject
-
-	tmpl, err := template.New("").Parse(sendErrorTemplate)
-	if err != nil {
-		return fmt.Errorf("can not parse template: %s", err)
-	}
-
+// respondError response to an incomming mail with an error message.
+func respondError(name, address, subject string, errs []error) error {
 	var text bytes.Buffer
-	err = tmpl.Execute(
+	err := mailErrorTmpl.Execute(
 		&text,
 		struct {
-			Name     string
-			Messages []string
-			Regards  string
+			Name    string
+			Errors  []error
+			Regards string
 		}{
-			to.Name,
-			messages,
+			name,
+			errs,
 			responseRegards,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("can not execute template: %s", err)
+		return xerrors.Errorf("can not render error template: %w", err)
 	}
 
-	return sendMail(to.Address, subject, text.String())
+	return sendMail(address, "Re: "+subject, text.String())
 }
 
-func sendSuccess(to *mail.Address, subject, token string) error {
-	subject = "Re: " + subject
-
-	tmpl, err := template.New("").Parse(sendSuccessTemplate)
-	if err != nil {
-		return fmt.Errorf("can not parse template: %s", err)
-	}
-
+// respondSuccess response to an incomming mail with an success message.
+func respondSuccess(name, address, subject, token string) error {
 	var text bytes.Buffer
-	err = tmpl.Execute(
+	err := mailSuccessTmpl.Execute(
 		&text,
 		struct {
 			Name       string
@@ -97,15 +71,15 @@ func sendSuccess(to *mail.Address, subject, token string) error {
 			RemoveLink string
 			Regards    string
 		}{
-			to.Name,
+			name,
 			deleteRedirectURL,
 			fmt.Sprintf("%s/delete/%s", baseURL, token),
 			responseRegards,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("can not execute template: %s", err)
+		return xerrors.Errorf("can not execute template: %w", err)
 	}
 
-	return sendMail(to.Address, subject, text.String())
+	return sendMail(address, "Re: "+subject, text.String())
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/urfave/cli"
 )
@@ -12,38 +14,22 @@ import (
 // Version to show in the help text and the --version flag. It is not set
 // directly in the sourcecode but set at complite time with
 // go build -ldflags "-X main.Version=1.0.0
-var Version = "development"
+var version = "development"
+
+func init() {
+	rand.Seed(time.Now().UTC().UnixNano())
+}
 
 func main() {
 	app := cli.NewApp()
 	app.Name = "mailimage"
 	app.Usage = "An image bord where images are posted via mail"
-	//app.HideHelp = true
-	app.Version = Version
-	//app.ArgsUsage = " " // If it is an empty string, then it shows a stupid default text
+	app.Version = version
 
 	app.Commands = []cli.Command{
 		{
-			Name:    "insert",
-			Aliases: []string{"i"},
-			Usage:   "Read an mail from stdin, parse it and save the image into te database",
-			Flags: []cli.Flag{
-				cli.BoolFlag{
-					Name:   "debug, d",
-					Usage:  "debug mode where mails are printed to stdout",
-					EnvVar: "DEBUG",
-				},
-			},
-			Action: func(c *cli.Context) error {
-				debug = c.Bool("debug")
-				insert(os.Stdin)
-				return nil
-			},
-		},
-		{
-			Name:    "serve",
-			Aliases: []string{"s"},
-			Usage:   "Serve the images via a webserver",
+			Name:  "serve",
+			Usage: "Serve the images via http",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "listen, l",
@@ -52,26 +38,64 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				serve(c.String("listen"))
-				return nil
+				// Log to file
+				if os.Getenv("DEBUG") == "" {
+					logPath := os.Getenv("LOG_PATH")
+					if logPath == "" {
+						logPath = defaultLogPath
+					}
+
+					f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0666)
+					if err != nil {
+						log.Fatalf("Can not open logfile: %s", err)
+					}
+					defer f.Close()
+
+					log.SetOutput(f)
+				}
+
+				return serve(c.String("listen"))
 			},
 		},
 		{
-			Name:    "delete",
-			Aliases: []string{"d"},
-			Usage:   "delete an image by id from the database",
+			Name:  "insert",
+			Usage: "Read an mail from stdin, parse it and save the image into te database",
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:   "debug, d",
+					Usage:  "debug mode where mails are printed to stdout",
+					EnvVar: "DEBUG",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				if c.Bool("debug") {
+					os.Setenv("FOO", "1")
+				}
+				return insert(os.Stdin)
+			},
+		},
+		{
+			Name:  "delete",
+			Usage: "delete an image by id from the database",
 			Action: func(c *cli.Context) error {
 				idS := c.Args().First()
 				if idS == "" {
 					fmt.Printf("No id given")
 					os.Exit(1)
 				}
+
 				id, err := strconv.Atoi(idS)
 				if err != nil {
 					fmt.Printf("Id has to be a string")
 					os.Exit(1)
 				}
-				err = deleteFromID(id)
+
+				pool, err := newPool(redisAddr)
+				if err != nil {
+					fmt.Printf("Can not create redis pool: %v", err)
+				}
+
+				err = pool.deleteFromID(id)
 				if err != nil {
 					fmt.Printf("Can not delete image: %s", err)
 				}
@@ -80,8 +104,9 @@ func main() {
 			},
 		},
 	}
+
 	if err := app.Run(os.Args); err != nil {
-		log.Printf("Error: Can not run app: %v", err)
+		log.Printf("Error: %v", err)
 		os.Exit(1)
 	}
 }

@@ -3,16 +3,17 @@
 An image block, where the images are posted via mail.
 
 
-## Build
-
-To build the binary, clone the repo and call:
-
-```
-$ go generate
-$ go build
-```
-
 ## Install
+
+Run
+
+```
+$ go get github.com/ostcar/mailimage
+```
+
+to install the program.
+
+## Dependencies
 
 
 To run mailimage, you have to install [redis](https://redis.io/).
