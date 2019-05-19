@@ -6,15 +6,11 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"net/mail"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/jhillyerd/enmime"
@@ -23,17 +19,10 @@ import (
 
 // insert saves an image to the database and the filesystem
 func insert(in io.Reader) (err error) {
-	// Create Folders
-	if err = createFolders(); err != nil {
-		return xerrors.Errorf("can not create folders: %w", err)
-	}
-
 	// Open file to save mail
-	fileName := fmt.Sprintf("%s-%02d.eml", time.Now().Format("2006-01-02_15-04-05"), rand.Intn(99))
-	filePath := path.Join(mailimagePath(), "progress", fileName)
-	f, err := os.Create(filePath)
+	f, err := newMailFile()
 	if err != nil {
-		return xerrors.Errorf("can not open image file for writing: %w", err)
+		return xerrors.Errorf("can not open mail file for writing: %w", err)
 	}
 	defer f.Close()
 
@@ -43,8 +32,7 @@ func insert(in io.Reader) (err error) {
 	// If an error happens after this line, move mail to error folder
 	defer func() {
 		if err != nil {
-			e := os.Rename(filePath, path.Join(mailimagePath(), "error", fileName))
-			if e != nil {
+			if e := f.move("error"); e != nil {
 				log.Printf("Original error: %v", err)
 				err = xerrors.Errorf("can not move mail to folder error: %w", e)
 			}
@@ -76,17 +64,12 @@ func insert(in io.Reader) (err error) {
 	}()
 
 	// Parse the mail and get the relevant informations
-	// TODO: Try to save image as reader or writer
+	// TODO: Try to return image as reader or writer
 	subject, text, imageExt, image, thumbnail, errs := parseMail(envelope)
 	if len(errs) > 0 {
-		// Move mail to invalid folder
-		newPath := path.Join(mailimagePath(), "invalid", fileName)
-		err = os.Rename(filePath, newPath)
-		if err != nil {
+		if err := f.move("invalid"); err != nil {
 			return xerrors.Errorf("can not move mail to invalid folder: %w", err)
 		}
-
-		filePath = newPath
 
 		if err := respondError(from.Name, from.Address, subject, errs); err != nil {
 			return xerrors.Errorf("can not responde to invalid mail: %w", err)
@@ -127,33 +110,12 @@ func insert(in io.Reader) (err error) {
 	}()
 
 	// Move mail to success
-	newPath := path.Join(mailimagePath(), "success", strconv.Itoa(id))
-	err = os.Rename(filePath, newPath)
-	if err != nil {
+	if err := f.move("success"); err != nil {
 		return xerrors.Errorf("can not move mail to success folder: %w", err)
 	}
 
-	filePath = newPath
-
 	if err := respondSuccess(from.Name, from.Address, subject, token); err != nil {
 		return xerrors.Errorf("can not send success mail: %w", err)
-	}
-	return nil
-}
-
-// createFolders creates the folders in the filesystem to save the mails and the images
-func createFolders() error {
-	folders := [...]string{
-		"progress",
-		"error",
-		"invalid",
-		"success",
-		"images",
-	}
-	for _, folder := range folders {
-		if err := os.MkdirAll(path.Join(mailimagePath(), folder), os.ModePerm); err != nil {
-			return err
-		}
 	}
 	return nil
 }
