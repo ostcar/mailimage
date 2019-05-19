@@ -2,6 +2,7 @@ package main
 
 import (
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -51,25 +52,31 @@ func (h *handler) index(w http.ResponseWriter, r *http.Request) error {
 // image returns an image via http.
 func (h *handler) image(w http.ResponseWriter, r *http.Request) error {
 	filename := r.URL.Path[len("/image/"):]
-	requestedExtension := filepath.Ext(filename)
+	requestedExt := filepath.Ext(filename)
 
-	id, err := strconv.Atoi(filename[0 : len(filename)-len(requestedExtension)])
+	id, err := strconv.Atoi(filename[0 : len(filename)-len(requestedExt)])
 	if err != nil {
 		w.WriteHeader(404)
 		return nil
 	}
 
-	image, dbExtension, err := h.redis.getImage(id)
+	dbExt, err := h.redis.getExtension(id)
 	if err != nil {
 		return err
 	}
 
-	if requestedExtension != dbExtension {
+	if requestedExt != dbExt {
 		w.WriteHeader(404)
 		return nil
 	}
 
-	if _, err := w.Write(image); err != nil {
+	image, err := openImage(id, dbExt)
+	if err != nil {
+		return err
+	}
+	defer image.Close()
+
+	if _, err := io.Copy(w, image); err != nil {
 		return xerrors.Errorf("can not write image to response writer: %w", err)
 	}
 	return nil
@@ -79,18 +86,20 @@ func (h *handler) image(w http.ResponseWriter, r *http.Request) error {
 func (h *handler) thumbnail(w http.ResponseWriter, r *http.Request) error {
 	filename := r.URL.Path[len("/thumbnail/"):]
 
+	// valid thumbnails end with .jpg. Strip it to get the file number
 	id, err := strconv.Atoi(filename[0 : len(filename)-4])
 	if err != nil {
 		w.WriteHeader(404)
 		return nil
 	}
 
-	thumbnail, err := h.redis.getThumbnail(id)
+	thumbnail, err := openThumbnail(id, h.redis)
 	if err != nil {
 		return err
 	}
+	defer thumbnail.Close()
 
-	if _, err := w.Write(thumbnail); err != nil {
+	if _, err := io.Copy(w, thumbnail); err != nil {
 		return xerrors.Errorf("can not write thumbnail to response writer: %w", err)
 	}
 	return nil

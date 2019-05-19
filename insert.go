@@ -1,24 +1,24 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/mail"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
-	"github.com/disintegration/imaging"
 	"github.com/jhillyerd/enmime"
 	"golang.org/x/xerrors"
 )
 
 // insert saves an image to the database and the filesystem
-func insert(in io.Reader) (err error) {
+func insert(in io.Reader) error {
 	// Open file to save mail
 	f, err := newMailFile()
 	if err != nil {
@@ -33,8 +33,7 @@ func insert(in io.Reader) (err error) {
 	defer func() {
 		if err != nil {
 			if e := f.move("error"); e != nil {
-				log.Printf("Original error: %v", err)
-				err = xerrors.Errorf("can not move mail to folder error: %w", e)
+				log.Printf("Can not move mail to error folder: %v", e)
 			}
 		}
 	}()
@@ -55,17 +54,14 @@ func insert(in io.Reader) (err error) {
 	defer func() {
 		if err != nil {
 			// TODO: Don't send the error template but a "500" template
-			sendErr := respondError(from.Name, from.Address, "Fehler", []error{errInternal})
-			if sendErr != nil {
-				log.Printf("Original error: %v", err)
-				err = xerrors.Errorf("can not send an error mail: %w", sendErr)
+			if e := respondError(from.Name, from.Address, "Fehler", []error{errInternal}); e != nil {
+				log.Printf("Can not send an error mail: %v", e)
 			}
 		}
 	}()
 
 	// Parse the mail and get the relevant informations
-	// TODO: Try to return image as reader or writer
-	subject, text, imageExt, image, thumbnail, errs := parseMail(envelope)
+	subject, text, imageExt, image, errs := parseMail(envelope)
 	if len(errs) > 0 {
 		if err := f.move("invalid"); err != nil {
 			return xerrors.Errorf("can not move mail to invalid folder: %w", err)
@@ -79,11 +75,11 @@ func insert(in io.Reader) (err error) {
 
 	pool, err := newPool(redisAddr)
 	if err != nil {
-		return xerrors.Errorf("can not create redis pool: %w", err)
+		return xerrors.Errorf("can not create redis pool to same mail %s: %w", f.name, err)
 	}
 
 	// Save data to redis
-	id, token, err := pool.postEntry(from.Name, from.Address, subject, text, imageExt, thumbnail)
+	id, token, err := pool.postEntry(from.Name, from.Address, subject, text, imageExt)
 	if err != nil {
 		return xerrors.Errorf("can not save mail: %w", err)
 	}
@@ -91,11 +87,17 @@ func insert(in io.Reader) (err error) {
 	// If an error happens after this line, delete element from redis
 	defer func() {
 		if err != nil {
-			// TODO: Delete element from redis
+			if e := pool.deleteFromID(id); e != nil {
+				log.Printf("Cat not remove element %d from redis: %v", id, err)
+			}
 		}
 	}()
 
 	// Save image to disk
+	if err := os.MkdirAll(path.Join(mailimagePath(), "images"), os.ModePerm); err != nil {
+		return xerrors.Errorf("can not create folder images: %w", err)
+	}
+
 	imagePath := path.Join(mailimagePath(), "images", fmt.Sprintf("%d%s", id, imageExt))
 	err = ioutil.WriteFile(imagePath, image, 0644)
 	if err != nil {
@@ -105,13 +107,19 @@ func insert(in io.Reader) (err error) {
 	// If an error happens after this line, delete image from disk
 	defer func() {
 		if err != nil {
-			// TODO: Delete element from disk
+			if e := os.Remove(imagePath); e != nil {
+				log.Printf("Can not remove image: %v", e)
+			}
 		}
 	}()
 
-	// Move mail to success
+	// Move mail to success and rename it to its id
+	if err := f.rename(strconv.Itoa(id)); err != nil {
+		return err
+	}
+
 	if err := f.move("success"); err != nil {
-		return xerrors.Errorf("can not move mail to success folder: %w", err)
+		return err
 	}
 
 	if err := respondSuccess(from.Name, from.Address, subject, token); err != nil {
@@ -121,7 +129,7 @@ func insert(in io.Reader) (err error) {
 }
 
 // parseMail parses an email and returns all relevant information about it
-func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image, thumbnail []byte, errs []error) {
+func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image []byte, errs []error) {
 	errs = make([]error, 0)
 
 	subject = strings.TrimSpace(mail.GetHeader("subject"))
@@ -136,25 +144,25 @@ func parseMail(mail *enmime.Envelope) (subject, text, imageExt string, image, th
 		errs = append(errs, errLongText)
 	}
 
-	image, thumbnail, imageExt, err := parseAttachments(mail.Root)
+	image, imageExt, err := parseAttachments(mail.Root)
 	if err != nil {
 		errs = append(errs, err)
 	}
 
-	return subject, text, imageExt, image, thumbnail, errs
+	return subject, text, imageExt, image, errs
 }
 
 // parseAttachments parses all attachments from an mail body and looks for supported images
 // The returned error message is send to the user.
-// Returns the image and the thumbnail as byte and the file extension
-func parseAttachments(part *enmime.Part) ([]byte, []byte, string, error) {
+// Returns the image and the file extension
+func parseAttachments(part *enmime.Part) ([]byte, string, error) {
 	imageParts := part.DepthMatchAll(imageMatcher)
 	if len(imageParts) < 1 {
-		return nil, nil, "", errNoImage
+		return nil, "", errNoImage
 	}
 
 	if len(imageParts) > 1 {
-		return nil, nil, "", errMultiImage
+		return nil, "", errMultiImage
 	}
 
 	if len(imageParts[0].Errors) > 0 {
@@ -163,22 +171,9 @@ func parseAttachments(part *enmime.Part) ([]byte, []byte, string, error) {
 			errs[i] = err.Error()
 		}
 		log.Printf("Can not parse image: %s", strings.Join(errs, ","))
-		return nil, nil, "", errParsingImage
+		return nil, "", errParsingImage
 	}
-
-	imageObject, err := imaging.Decode(bytes.NewReader(imageParts[0].Content))
-	if err != nil {
-		log.Printf("Can not read image: %v", err)
-		return nil, nil, "", errParsingImage
-	}
-
-	imageObject = imaging.Fill(imageObject, 250, 200, imaging.Center, imaging.Lanczos)
-	buf := bytes.NewBuffer(make([]byte, 0))
-	if err := imaging.Encode(buf, imageObject, imaging.JPEG); err != nil {
-		log.Printf("Can not create thumbnail: %v", err)
-		return nil, nil, "", errCreateThumbnail
-	}
-	return imageParts[0].Content, buf.Bytes(), filepath.Ext(imageParts[0].FileName), nil
+	return imageParts[0].Content, filepath.Ext(imageParts[0].FileName), nil
 }
 
 // isAllowed returns true, if the attachment has a supported mail format

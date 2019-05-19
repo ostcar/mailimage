@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path"
@@ -41,7 +40,7 @@ func newPool(addr string) (*pool, error) {
 
 // postEntry saves an new entry to the database
 // Returns the new id and the delete token
-func (p *pool) postEntry(fromName, fromAddr, subject, text, imageExt string, thumbnail []byte) (int, string, error) {
+func (p *pool) postEntry(fromName, fromAddr, subject, text, imageExt string) (int, string, error) {
 	conn := p.Get()
 	defer conn.Close()
 
@@ -63,8 +62,6 @@ func (p *pool) postEntry(fromName, fromAddr, subject, text, imageExt string, thu
 		text,
 		"fileext",
 		imageExt,
-		"thumbnail",
-		thumbnail,
 		"created",
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
@@ -126,48 +123,20 @@ func (p *pool) listEntries() ([]entry, error) {
 }
 
 // getImage gets an image and the file extension for an id
-// TODO: Return an reader, Only return the extension, the image is not saved in redis
-func (p *pool) getImage(id int) ([]byte, string, error) {
+func (p *pool) getExtension(id int) (string, error) {
 	conn := p.Get()
 	defer conn.Close()
 
 	ext, err := redis.String(conn.Do("HGET", key("entry", strconv.Itoa(id)), "fileext"))
 	if err != nil {
-		return nil, "", xerrors.Errorf("can not get extension for image with id %d: %w", id, err)
+		return "", xerrors.Errorf("can not get extension for image with id %d: %w", id, err)
 	}
 
 	// The image is unknown in redis
 	if ext == "" {
-		return nil, "", errUnknownImage
+		return "", errUnknownImage
 	}
-
-	filePath := path.Join(mailimagePath(), "images", fmt.Sprintf("%d%s", id, ext))
-	image, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", errUnknownImage
-		}
-		return nil, "", xerrors.Errorf("can not get image %d: %s", id, err)
-	}
-
-	return image, ext, nil
-}
-
-// getThumbnail gets an thumbnail for an id
-// TODO: Save thumbnail on disk. For this purpose it is not necessary to hold the thumbnails in memory all the time
-func (p *pool) getThumbnail(id int) ([]byte, error) {
-	conn := p.Get()
-	defer conn.Close()
-
-	image, err := redis.Bytes(conn.Do("HGET", key("entry", strconv.Itoa(id)), "thumbnail"))
-	if err != nil {
-		return nil, xerrors.Errorf("can not get thumbnail %d: %w", id, err)
-	}
-
-	if image == nil {
-		return nil, errUnknownImage
-	}
-	return image, nil
+	return ext, nil
 }
 
 // createDeleteToken saves a new delete token into the database
