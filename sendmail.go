@@ -31,7 +31,7 @@ func sendMail(to string, subject string, text string) error {
 		return nil
 	}
 
-	d := mail.Dialer{Host: smptHost, Port: smptPort}
+	d := mail.Dialer{Host: smptHost, Port: smptPort, StartTLSPolicy: mail.NoStartTLS}
 	if err := d.DialAndSend(m); err != nil {
 		return xerrors.Errorf("can not send mail: %w", err)
 	}

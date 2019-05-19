@@ -80,24 +80,24 @@ func main() {
 			Action: func(c *cli.Context) error {
 				idS := c.Args().First()
 				if idS == "" {
-					fmt.Printf("No id given")
+					fmt.Printf("No id given\n")
 					os.Exit(1)
 				}
 
 				id, err := strconv.Atoi(idS)
 				if err != nil {
-					fmt.Printf("Id has to be a string")
+					fmt.Printf("Id has to be a string\n")
 					os.Exit(1)
 				}
 
 				pool, err := newPool(redisAddr)
 				if err != nil {
-					fmt.Printf("Can not create redis pool: %v", err)
+					fmt.Printf("Can not create redis pool: %v\n", err)
 				}
 
 				err = pool.deleteFromID(id)
 				if err != nil {
-					fmt.Printf("Can not delete image: %s", err)
+					fmt.Printf("Can not delete image: %s\n", err)
 				}
 
 				return nil
