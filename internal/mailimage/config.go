@@ -1,4 +1,4 @@
-package main
+package mailimage
 
 const (
 	redisAddr = ":6379"
@@ -7,7 +7,6 @@ const (
 
 	tokenLength          = 8
 	tokenExpire          = 24 * 60 * 60
-	defaultLogPath       = "/var/log/mailimage.log"
 	defaultMailimagePath = "/srv/mailimage/mails"
 	subjectLength        = 25
 	textLength           = 200

@@ -1,4 +1,4 @@
-package main
+package mailimage
 
 type entry struct {
 	ID        int

@@ -1,4 +1,4 @@
-package main
+package mailimage
 
 import (
 	"html/template"
@@ -12,10 +12,11 @@ import (
 	"golang.org/x/xerrors"
 )
 
-//go:generate go run scripts/buildHTML.go
+//go:generate go run ../../scripts/buildHTML.go
 var indexTmpl = template.Must(template.New("indexPage").Parse(indexHTMLTemplate))
 
-func serve(addr string) error {
+// Serve creates the handlers and listen and serves it
+func Serve(addr string) error {
 	pool, err := newPool(redisAddr)
 	if err != nil {
 		return err

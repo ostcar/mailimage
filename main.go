@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ostcar/mailimage/internal/mailimage"
 	"github.com/urfave/cli"
 )
 
@@ -15,6 +16,8 @@ import (
 // directly in the sourcecode but set at complite time with
 // go build -ldflags "-X main.Version=1.0.0
 var version = "development"
+
+const defaultLogPath = "/var/log/mailimage.log"
 
 func init() {
 	rand.Seed(time.Now().UTC().UnixNano())
@@ -54,7 +57,7 @@ func main() {
 					log.SetOutput(f)
 				}
 
-				return serve(c.String("listen"))
+				return mailimage.Serve(c.String("listen"))
 			},
 		},
 		{
@@ -71,7 +74,7 @@ func main() {
 				if c.Bool("debug") {
 					os.Setenv("FOO", "1")
 				}
-				return insert(os.Stdin)
+				return mailimage.Insert(os.Stdin)
 			},
 		},
 		{
@@ -90,17 +93,7 @@ func main() {
 					os.Exit(1)
 				}
 
-				pool, err := newPool(redisAddr)
-				if err != nil {
-					fmt.Printf("Can not create redis pool: %v\n", err)
-				}
-
-				err = pool.deleteFromID(id)
-				if err != nil {
-					fmt.Printf("Can not delete image: %s\n", err)
-				}
-
-				return nil
+				return mailimage.Delete(id)
 			},
 		},
 	}

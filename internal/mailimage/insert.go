@@ -1,4 +1,4 @@
-package main
+package mailimage
 
 import (
 	"fmt"
@@ -17,8 +17,8 @@ import (
 	"golang.org/x/xerrors"
 )
 
-// insert saves an image to the database and the filesystem
-func insert(in io.Reader) error {
+// Insert saves an image to the database and the filesystem
+func Insert(in io.Reader) error {
 	// Open file to save mail
 	f, err := newMailFile()
 	if err != nil {
